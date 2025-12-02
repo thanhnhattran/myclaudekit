@@ -1,0 +1,113 @@
+{
+  "name": "claudekit",
+  "displayName": "ClaudeKit - Multi-Agent Orchestrator",
+  "description": "A VS Code Extension that acts as a GUI Wrapper for claude-code CLI and the MCP ecosystem",
+  "version": "0.1.0",
+  "publisher": "thanhnhattran",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "claude",
+    "ai",
+    "agent",
+    "mcp",
+    "orchestrator"
+  ],
+  "activationEvents": [
+    "onCommand:claudekit.openPanel",
+    "onView:claudekit.agentsView"
+  ],
+  "main": "./out/extension/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudekit.openPanel",
+        "title": "ClaudeKit: Open Agent Panel",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "claudekit.runAgent",
+        "title": "ClaudeKit: Run Agent"
+      },
+      {
+        "command": "claudekit.stopAgent",
+        "title": "ClaudeKit: Stop Agent"
+      },
+      {
+        "command": "claudekit.runWorkflow",
+        "title": "ClaudeKit: Run Workflow"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudekit",
+          "title": "ClaudeKit",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudekit": [
+        {
+          "type": "webview",
+          "id": "claudekit.agentsView",
+          "name": "Agents"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ClaudeKit",
+      "properties": {
+        "claudekit.claudeCliPath": {
+          "type": "string",
+          "default": "claude",
+          "description": "Path to claude-code CLI executable"
+        },
+        "claudekit.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum retries for agent execution on error"
+        },
+        "claudekit.defaultModel": {
+          "type": "string",
+          "default": "claude-opus-4-5-20251101",
+          "enum": [
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-5-20250929",
+            "claude-3-5-haiku-20241022"
+          ],
+          "description": "Default Claude model for agents"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "npm run build:extension && npm run build:webview",
+    "build:extension": "tsc -p ./tsconfig.json",
+    "build:webview": "npm run --prefix src/webview build",
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "lint": "eslint src --ext ts,tsx",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thanhnhattran/myclaudekit.git"
+  },
+  "license": "MIT"
+}

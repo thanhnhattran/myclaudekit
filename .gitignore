@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+src/webview/node_modules/
+
+# Build output
+out/
+dist/
+*.vsix
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test
+coverage/
+.nyc_output/
+
+# Cache
+.eslintcache
+*.tsbuildinfo

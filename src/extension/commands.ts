@@ -1,0 +1,206 @@
+import * as vscode from 'vscode';
+import { StateManager } from '../lib/stateManager';
+import { AgentViewProvider } from './agentViewProvider';
+import { AgentRunner } from '../lib/runner';
+import { AgentRole } from '../types';
+import { AGENTS } from '../agents/agents.config';
+
+export function registerCommands(
+  context: vscode.ExtensionContext,
+  stateManager: StateManager,
+  viewProvider: AgentViewProvider
+): void {
+  // Command: Open Agent Panel
+  const openPanelCmd = vscode.commands.registerCommand('claudekit.openPanel', () => {
+    vscode.commands.executeCommand('claudekit.agentsView.focus');
+  });
+
+  // Command: Run Agent
+  const runAgentCmd = vscode.commands.registerCommand(
+    'claudekit.runAgent',
+    async (agentId?: AgentRole) => {
+      // If no agentId provided, show quick pick
+      if (!agentId) {
+        const items = AGENTS.map(agent => ({
+          label: `${agent.icon} ${agent.name}`,
+          description: agent.description,
+          agentId: agent.id
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select an agent to run'
+        });
+
+        if (!selected) {
+          return;
+        }
+        agentId = selected.agentId;
+      }
+
+      // Get user prompt
+      const prompt = await vscode.window.showInputBox({
+        prompt: `Enter your prompt for ${agentId} agent`,
+        placeHolder: 'Describe what you want the agent to do...'
+      });
+
+      if (!prompt) {
+        return;
+      }
+
+      // Get configuration
+      const config = vscode.workspace.getConfiguration('claudekit');
+      const cliPath = config.get<string>('claudeCliPath', 'claude');
+      const maxRetries = config.get<number>('maxRetries', 3);
+      const model = config.get<string>('defaultModel', 'claude-opus-4-5-20251101');
+
+      // Get working directory
+      const workingDirectory = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+
+      // Create runner and execute
+      const runner = new AgentRunner({
+        cliPath,
+        maxRetries,
+        model,
+        workingDirectory
+      });
+
+      const agent = AGENTS.find(a => a.id === agentId);
+      if (!agent) {
+        vscode.window.showErrorMessage(`Agent ${agentId} not found`);
+        return;
+      }
+
+      // Update state to running
+      stateManager.updateAgentState(agentId, {
+        id: agentId,
+        status: 'running',
+        output: '',
+        retryCount: 0,
+        startTime: Date.now()
+      });
+
+      // Notify webview
+      viewProvider.sendMessage({
+        type: 'agentUpdate',
+        payload: {
+          agentId,
+          state: stateManager.getAgentState(agentId)!
+        }
+      });
+
+      try {
+        const result = await runner.run(agent, prompt, (chunk) => {
+          // Stream output to state
+          const currentState = stateManager.getAgentState(agentId!);
+          if (currentState) {
+            stateManager.updateAgentState(agentId!, {
+              ...currentState,
+              output: currentState.output + chunk
+            });
+
+            // Notify webview of update
+            viewProvider.sendMessage({
+              type: 'agentUpdate',
+              payload: {
+                agentId: agentId!,
+                state: stateManager.getAgentState(agentId!)!
+              }
+            });
+          }
+        });
+
+        // Update final state
+        stateManager.updateAgentState(agentId, {
+          id: agentId,
+          status: result.success ? 'completed' : 'error',
+          output: result.output,
+          error: result.error,
+          retryCount: 0,
+          endTime: Date.now()
+        });
+
+        if (result.success) {
+          vscode.window.showInformationMessage(`Agent ${agent.name} completed successfully`);
+        } else {
+          vscode.window.showErrorMessage(`Agent ${agent.name} failed: ${result.error}`);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        stateManager.updateAgentState(agentId, {
+          id: agentId,
+          status: 'error',
+          output: '',
+          error: errorMessage,
+          retryCount: 0,
+          endTime: Date.now()
+        });
+        vscode.window.showErrorMessage(`Agent ${agent.name} error: ${errorMessage}`);
+      }
+
+      // Notify webview of final state
+      viewProvider.sendMessage({
+        type: 'agentUpdate',
+        payload: {
+          agentId,
+          state: stateManager.getAgentState(agentId)!
+        }
+      });
+    }
+  );
+
+  // Command: Stop Agent
+  const stopAgentCmd = vscode.commands.registerCommand(
+    'claudekit.stopAgent',
+    async (agentId?: AgentRole) => {
+      if (!agentId) {
+        // Show running agents
+        const runningAgents = stateManager.getRunningAgents();
+        if (runningAgents.length === 0) {
+          vscode.window.showInformationMessage('No agents are currently running');
+          return;
+        }
+
+        const items = runningAgents.map(state => {
+          const agent = AGENTS.find(a => a.id === state.id);
+          return {
+            label: `${agent?.icon || ''} ${agent?.name || state.id}`,
+            description: 'Running',
+            agentId: state.id
+          };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select an agent to stop'
+        });
+
+        if (!selected) {
+          return;
+        }
+        agentId = selected.agentId;
+      }
+
+      stateManager.stopAgent(agentId);
+      vscode.window.showInformationMessage(`Stopped agent ${agentId}`);
+
+      // Notify webview
+      viewProvider.sendMessage({
+        type: 'agentUpdate',
+        payload: {
+          agentId,
+          state: stateManager.getAgentState(agentId)!
+        }
+      });
+    }
+  );
+
+  // Command: Run Workflow
+  const runWorkflowCmd = vscode.commands.registerCommand(
+    'claudekit.runWorkflow',
+    async () => {
+      // TODO: Implement workflow picker and execution
+      vscode.window.showInformationMessage('Workflow execution coming soon!');
+    }
+  );
+
+  context.subscriptions.push(openPanelCmd, runAgentCmd, stopAgentCmd, runWorkflowCmd);
+}

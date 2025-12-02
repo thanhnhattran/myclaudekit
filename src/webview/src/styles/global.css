@@ -1,0 +1,325 @@
+/* CSS Variables from VS Code */
+:root {
+  --font-family: var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif);
+  --font-size: var(--vscode-font-size, 13px);
+  --bg-color: var(--vscode-sideBar-background, #1e1e1e);
+  --fg-color: var(--vscode-foreground, #cccccc);
+  --border-color: var(--vscode-widget-border, #454545);
+  --card-bg: var(--vscode-editor-background, #252526);
+  --hover-bg: var(--vscode-list-hoverBackground, #2a2d2e);
+  --focus-border: var(--vscode-focusBorder, #007acc);
+  --error-color: var(--vscode-errorForeground, #f14c4c);
+  --success-color: var(--vscode-charts-green, #89d185);
+  --warning-color: var(--vscode-charts-yellow, #cca700);
+  --description-color: var(--vscode-descriptionForeground, #8c8c8c);
+  --terminal-bg: var(--vscode-terminal-background, #1e1e1e);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  color: var(--fg-color);
+  background-color: var(--bg-color);
+  line-height: 1.5;
+}
+
+.app {
+  padding: 12px;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.header-icon {
+  font-size: 20px;
+}
+
+.header h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--description-color);
+  margin-bottom: 8px;
+}
+
+/* Agents Grid */
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 24px;
+  color: var(--description-color);
+}
+
+/* Agent Card */
+.agent-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.agent-card:hover {
+  border-color: var(--focus-border);
+  background: var(--hover-bg);
+}
+
+.agent-card:focus {
+  outline: none;
+  border-color: var(--focus-border);
+  box-shadow: 0 0 0 1px var(--focus-border);
+}
+
+.agent-card.selected {
+  border-color: var(--focus-border);
+}
+
+.agent-card.running {
+  border-color: var(--warning-color);
+  animation: pulse 1.5s infinite;
+}
+
+.agent-card.completed {
+  border-color: var(--success-color);
+}
+
+.agent-card.error {
+  border-color: var(--error-color);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.agent-icon {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.agent-name {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--description-color);
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--warning-color);
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.stop-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: var(--error-color);
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.agent-card:hover .stop-button {
+  opacity: 1;
+}
+
+/* Terminal Stream */
+.terminal-stream {
+  background: var(--terminal-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.terminal-stream pre {
+  font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+/* Workflow Builder */
+.workflow-builder {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.workflow-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.workflow-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pattern-select {
+  background: var(--bg-color);
+  color: var(--fg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.workflow-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.agent-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.agent-checkbox input {
+  accent-color: var(--focus-border);
+}
+
+.workflow-preview {
+  background: var(--bg-color);
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.workflow-preview h4 {
+  font-size: 11px;
+  color: var(--description-color);
+  margin-bottom: 8px;
+}
+
+.preview-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-chain .empty {
+  color: var(--description-color);
+  font-style: italic;
+}
+
+.preview-agent {
+  background: var(--card-bg);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.connector {
+  color: var(--focus-border);
+  font-weight: bold;
+}
+
+.run-workflow-btn {
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--focus-border);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.run-workflow-btn:hover {
+  opacity: 0.9;
+}
+
+.run-workflow-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--description-color);
+}
