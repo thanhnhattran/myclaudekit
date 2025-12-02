@@ -102,6 +102,10 @@ export class AgentRunner {
       let errorOutput = '';
 
       try {
+        console.log('[ClaudeKit] Spawning claude with args:', args);
+        console.log('[ClaudeKit] Working directory:', this.options.workingDirectory);
+        console.log('[ClaudeKit] CLI path:', this.options.cliPath);
+
         this.currentProcess = spawn(this.options.cliPath, args, {
           cwd: this.options.workingDirectory,
           shell: true,
@@ -113,13 +117,17 @@ export class AgentRunner {
 
         // Write prompt to stdin (safer than CLI arg for long/complex prompts)
         if (this.currentProcess.stdin) {
+          console.log('[ClaudeKit] Writing prompt to stdin, length:', fullPrompt.length);
           this.currentProcess.stdin.write(fullPrompt);
           this.currentProcess.stdin.end();
+        } else {
+          console.error('[ClaudeKit] stdin is not available!');
         }
 
         this.currentProcess.stdout?.on('data', (data: Buffer) => {
           const chunk = data.toString();
           output += chunk;
+          console.log('[ClaudeKit] stdout chunk:', chunk.substring(0, 200));
           // For JSON output, we'll parse at the end - just show progress indicator
           if (onOutput) {
             onOutput('.');
@@ -129,12 +137,19 @@ export class AgentRunner {
         this.currentProcess.stderr?.on('data', (data: Buffer) => {
           const chunk = data.toString();
           errorOutput += chunk;
+          console.log('[ClaudeKit] stderr:', chunk);
           if (onOutput) {
             onOutput(`[stderr] ${chunk}`);
           }
         });
 
+        this.currentProcess.stdin?.on('error', (err) => {
+          console.error('[ClaudeKit] stdin error:', err);
+        });
+
         this.currentProcess.on('close', (code) => {
+          console.log('[ClaudeKit] Process closed with code:', code);
+          console.log('[ClaudeKit] Total output length:', output.length);
           this.currentProcess = null;
 
           // Try to parse JSON response first

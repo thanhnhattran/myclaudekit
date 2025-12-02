@@ -121,7 +121,8 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
       case 'runAgent':
         const runPayload = message.payload as RunAgentPayload;
-        vscode.commands.executeCommand('claudekit.runAgent', runPayload.agentId);
+        // Pass both agentId and prompt to command
+        vscode.commands.executeCommand('claudekit.runAgent', runPayload.agentId, runPayload.prompt);
         break;
 
       case 'stopAgent':

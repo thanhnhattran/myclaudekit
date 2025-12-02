@@ -18,7 +18,7 @@ export function registerCommands(
   // Command: Run Agent
   const runAgentCmd = vscode.commands.registerCommand(
     'claudekit.runAgent',
-    async (agentId?: AgentRole) => {
+    async (agentId?: AgentRole, promptArg?: string) => {
       // Get agents from provider (includes file-based and builtin)
       const agents = viewProvider.getAgents();
 
@@ -40,11 +40,14 @@ export function registerCommands(
         agentId = selected.agentId;
       }
 
-      // Get user prompt
-      const prompt = await vscode.window.showInputBox({
-        prompt: `Enter your prompt for ${agentId} agent`,
-        placeHolder: 'Describe what you want the agent to do...'
-      });
+      // Use provided prompt or ask for one
+      let prompt = promptArg;
+      if (!prompt) {
+        prompt = await vscode.window.showInputBox({
+          prompt: `Enter your prompt for ${agentId} agent`,
+          placeHolder: 'Describe what you want the agent to do...'
+        });
+      }
 
       if (!prompt) {
         return;
