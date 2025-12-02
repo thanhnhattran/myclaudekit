@@ -96,7 +96,7 @@ export class AgentRunner {
   ): Promise<RunResult> {
     return new Promise((resolve) => {
       const fullPrompt = this.promptManager.buildPrompt(agent, userPrompt);
-      const args = this.buildCliArgs(agent, fullPrompt);
+      const args = this.buildCliArgs(agent);
 
       let output = '';
       let errorOutput = '';
@@ -110,6 +110,12 @@ export class AgentRunner {
             FORCE_COLOR: '0' // Disable color codes for clean output
           }
         });
+
+        // Write prompt to stdin (safer than CLI arg for long/complex prompts)
+        if (this.currentProcess.stdin) {
+          this.currentProcess.stdin.write(fullPrompt);
+          this.currentProcess.stdin.end();
+        }
 
         this.currentProcess.stdout?.on('data', (data: Buffer) => {
           const chunk = data.toString();
@@ -200,7 +206,7 @@ export class AgentRunner {
     return this.currentProcess !== null;
   }
 
-  private buildCliArgs(agent: AgentConfig, prompt: string): string[] {
+  private buildCliArgs(agent: AgentConfig): string[] {
     const args: string[] = [];
 
     // Add model if specified
@@ -213,9 +219,7 @@ export class AgentRunner {
     args.push('--print');
     args.push('--output-format', 'json');
 
-    // Add the prompt as positional argument (not a flag)
-    args.push(prompt);
-
+    // Prompt will be passed via stdin (safer for long/complex prompts)
     return args;
   }
 }
