@@ -4,35 +4,56 @@ import { AgentViewProvider } from './agentViewProvider';
 import { StateManager } from '../lib/stateManager';
 
 let stateManager: StateManager;
+let outputChannel: vscode.OutputChannel;
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('ClaudeKit is activating...');
+  outputChannel = vscode.window.createOutputChannel('ClaudeKit');
+  outputChannel.appendLine('ClaudeKit is activating...');
 
-  // Initialize State Manager
-  stateManager = new StateManager();
+  try {
+    // Initialize State Manager
+    stateManager = new StateManager();
+    outputChannel.appendLine('StateManager initialized');
 
-  // Register the Webview Provider
-  const agentViewProvider = new AgentViewProvider(context.extensionUri, stateManager);
-
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      'claudekit.agentsView',
-      agentViewProvider,
-      {
-        webviewOptions: {
-          retainContextWhenHidden: true
+    // Register the Webview Provider
+    const agentViewProvider = new AgentViewProvider(context.extensionUri, stateManager);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        'claudekit.agentsView',
+        agentViewProvider,
+        {
+          webviewOptions: {
+            retainContextWhenHidden: true
+          }
         }
-      }
-    )
-  );
+      )
+    );
+    outputChannel.appendLine('WebviewViewProvider registered');
 
-  // Register Commands
-  registerCommands(context, stateManager, agentViewProvider);
+    // Register Commands
+    try {
+      registerCommands(context, stateManager, agentViewProvider);
+      outputChannel.appendLine('Commands registered successfully');
 
-  // Show welcome message
-  vscode.window.showInformationMessage('ClaudeKit is ready! Open the sidebar to start.');
+      // Verify commands are registered
+      vscode.commands.getCommands(true).then(cmds => {
+        const claudekitCmds = cmds.filter(c => c.startsWith('claudekit.'));
+        outputChannel.appendLine(`Registered ClaudeKit commands: ${claudekitCmds.join(', ')}`);
+      });
+    } catch (cmdError) {
+      outputChannel.appendLine(`ERROR registering commands: ${cmdError}`);
+      console.error('ClaudeKit: Error registering commands:', cmdError);
+    }
 
-  console.log('ClaudeKit activated successfully.');
+    // Show welcome message
+    vscode.window.showInformationMessage('ClaudeKit is ready! Open the sidebar to start.');
+    outputChannel.appendLine('ClaudeKit activated successfully.');
+
+  } catch (error) {
+    outputChannel.appendLine(`ERROR during activation: ${error}`);
+    console.error('ClaudeKit activation error:', error);
+    throw error;
+  }
 }
 
 export function deactivate() {

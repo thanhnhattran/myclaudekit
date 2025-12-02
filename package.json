@@ -19,10 +19,7 @@
     "mcp",
     "orchestrator"
   ],
-  "activationEvents": [
-    "onCommand:claudekit.openPanel",
-    "onView:claudekit.agentsView"
-  ],
+  "activationEvents": [],
   "main": "./out/extension/extension.js",
   "contributes": {
     "commands": [
