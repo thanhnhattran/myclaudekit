@@ -1,10 +1,15 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { StateManager } from '../lib/stateManager';
-import { Message, RunAgentPayload, StopAgentPayload, ProjectTokenStats } from '../types';
+import { Message, RunAgentPayload, StopAgentPayload, ProjectTokenStats, AgentConfig } from '../types';
 import { AGENTS } from '../agents/agents.config';
+import { AgentLoader, mergeAgents } from '../lib/agentLoader';
 
 export class AgentViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
+  private _agentLoader?: AgentLoader;
+  private _cachedAgents: AgentConfig[] = [];
+  private _fileWatcher: fs.FSWatcher | null = null;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -17,6 +22,66 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
         payload: stats
       });
     });
+
+    // Initialize agent loader with workspace root
+    this._initializeAgentLoader();
+  }
+
+  private _initializeAgentLoader(): void {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+      const workspaceRoot = workspaceFolders[0].uri.fsPath;
+      this._agentLoader = new AgentLoader(workspaceRoot);
+
+      // Watch for changes in .claude/agents/ folder
+      this._fileWatcher = this._agentLoader.watchForChanges(() => {
+        this._loadAgentsAndNotify();
+      });
+    }
+  }
+
+  /**
+   * Load agents from files and merge with builtins
+   */
+  private async _loadAgents(): Promise<AgentConfig[]> {
+    let fileAgents: AgentConfig[] = [];
+
+    if (this._agentLoader) {
+      try {
+        fileAgents = await this._agentLoader.loadAgents();
+      } catch (error) {
+        console.error('Error loading agents from files:', error);
+      }
+    }
+
+    // Merge file-based agents with builtins (file-based take priority)
+    this._cachedAgents = mergeAgents(fileAgents, AGENTS);
+    return this._cachedAgents;
+  }
+
+  /**
+   * Load agents and notify webview
+   */
+  private async _loadAgentsAndNotify(): Promise<void> {
+    await this._loadAgents();
+    this._sendAgentsList();
+  }
+
+  /**
+   * Get all loaded agents
+   */
+  public getAgents(): AgentConfig[] {
+    return this._cachedAgents.length > 0 ? this._cachedAgents : AGENTS;
+  }
+
+  /**
+   * Dispose resources
+   */
+  public dispose(): void {
+    if (this._fileWatcher) {
+      this._fileWatcher.close();
+      this._fileWatcher = null;
+    }
   }
 
   public resolveWebviewView(
@@ -85,8 +150,15 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _sendAgentsList(): void {
-    const agentsWithState = AGENTS.map(agent => ({
+  private async _sendAgentsList(): Promise<void> {
+    // Load agents if not cached
+    if (this._cachedAgents.length === 0) {
+      await this._loadAgents();
+    }
+
+    const agents = this._cachedAgents.length > 0 ? this._cachedAgents : AGENTS;
+
+    const agentsWithState = agents.map(agent => ({
       ...agent,
       state: this._stateManager.getAgentState(agent.id) || {
         id: agent.id,
@@ -199,6 +271,32 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .token-stat-value { font-size: 16px; font-weight: 600; color: var(--fg); }
     .token-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; }
     .token-stat-cost { color: var(--success); }
+
+    /* Agent Details Panel */
+    .agent-details { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 8px; display: none; }
+    .agent-details.visible { display: block; }
+    .agent-details-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .agent-details-icon { font-size: 24px; }
+    .agent-details-info { flex: 1; }
+    .agent-details-name { font-size: 14px; font-weight: 600; }
+    .agent-details-role { font-size: 11px; color: var(--muted); }
+    .agent-details-source { font-size: 9px; padding: 2px 6px; border-radius: 3px; background: var(--hover); color: var(--muted); }
+    .agent-details-desc { font-size: 12px; color: var(--fg); margin-bottom: 8px; line-height: 1.4; }
+    .agent-details-caps { margin-bottom: 8px; }
+    .agent-details-caps-title { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    .agent-details-caps-list { font-size: 11px; color: var(--fg); padding-left: 16px; }
+    .agent-details-caps-list li { margin-bottom: 2px; }
+
+    /* Example Panel */
+    .example-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; margin-bottom: 8px; }
+    .example-toggle input { cursor: pointer; }
+    .example-panel { display: none; background: var(--terminal); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-family: monospace; font-size: 11px; max-height: 200px; overflow-y: auto; }
+    .example-panel.visible { display: block; }
+    .example-section { margin-bottom: 8px; }
+    .example-label { font-size: 10px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+    .example-content { white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+    .example-input { border-left: 2px solid var(--success); padding-left: 8px; }
+    .example-output { border-left: 2px solid var(--focus); padding-left: 8px; }
   </style>
 </head>
 <body>
@@ -223,16 +321,19 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div class="token-stat">
           <div class="token-stat-value token-stat-cost" id="total-cost">$0.00</div>
-          <div class="token-stat-label">Est. Cost</div>
+          <div class="token-stat-label">Cost (USD)</div>
         </div>
         <div class="token-stat">
-          <div class="token-stat-value" id="input-tokens">0</div>
-          <div class="token-stat-label">Input</div>
+          <div class="token-stat-value" id="session-count">0</div>
+          <div class="token-stat-label">Runs</div>
         </div>
         <div class="token-stat">
-          <div class="token-stat-value" id="output-tokens">0</div>
-          <div class="token-stat-label">Output</div>
+          <div class="token-stat-value" id="session-time">-</div>
+          <div class="token-stat-label">Since Reset</div>
         </div>
+      </div>
+      <div id="token-details" style="font-size: 9px; color: var(--muted); margin-top: 6px; text-align: center;">
+        In: <span id="input-tokens">0</span> | Out: <span id="output-tokens">0</span>
       </div>
     </div>
 
@@ -245,6 +346,37 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       <div class="section-title">Select an Agent</div>
       <div id="agents-grid" class="agents-grid">
         <div class="empty-state">Loading...</div>
+      </div>
+
+      <!-- Agent Details Panel -->
+      <div id="agent-details" class="agent-details">
+        <div class="agent-details-header">
+          <span id="agent-details-icon" class="agent-details-icon"></span>
+          <div class="agent-details-info">
+            <div id="agent-details-name" class="agent-details-name"></div>
+            <div id="agent-details-role" class="agent-details-role"></div>
+          </div>
+          <span id="agent-details-source" class="agent-details-source"></span>
+        </div>
+        <div id="agent-details-desc" class="agent-details-desc"></div>
+        <div class="agent-details-caps">
+          <div class="agent-details-caps-title">Capabilities</div>
+          <ul id="agent-details-caps" class="agent-details-caps-list"></ul>
+        </div>
+        <label class="example-toggle" id="example-toggle-container" style="display: none;">
+          <input type="checkbox" id="show-example-toggle" onchange="toggleExample()">
+          <span>Show Example</span>
+        </label>
+        <div id="example-panel" class="example-panel">
+          <div class="example-section">
+            <div class="example-label">INPUT</div>
+            <div id="example-input" class="example-content example-input"></div>
+          </div>
+          <div class="example-section">
+            <div class="example-label">OUTPUT</div>
+            <div id="example-output" class="example-content example-output"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -312,7 +444,12 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       document.getElementById('total-tokens').textContent = formatNumber(stats.totalTokens);
       document.getElementById('input-tokens').textContent = formatNumber(stats.totalInputTokens);
       document.getElementById('output-tokens').textContent = formatNumber(stats.totalOutputTokens);
-      document.getElementById('total-cost').textContent = '$' + stats.totalCost.toFixed(4);
+      document.getElementById('total-cost').textContent = '$' + stats.totalCost.toFixed(2);
+      document.getElementById('session-count').textContent = stats.sessionCount || 0;
+
+      // Calculate time since reset
+      const resetTime = stats.lastResetTime || stats.sessionStartTime || Date.now();
+      document.getElementById('session-time').textContent = formatDuration(Date.now() - resetTime);
     }
 
     function resetTokenStats() {
@@ -325,6 +462,18 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
       if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
       return num.toString();
+    }
+
+    function formatDuration(ms) {
+      const seconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+
+      if (days > 0) return days + 'd';
+      if (hours > 0) return hours + 'h';
+      if (minutes > 0) return minutes + 'm';
+      return 'now';
     }
 
     function renderAgents() {
@@ -357,13 +506,63 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       renderAgents();
       renderWorkflows();
       const agent = agents.find(a => a.id === id);
-      if (agent?.state?.output) updateOutput(agent.state.output);
+      if (agent) {
+        showAgentDetails(agent);
+        if (agent.state?.output) updateOutput(agent.state.output);
+      }
       document.getElementById('prompt-input').focus();
+    }
+
+    function showAgentDetails(agent) {
+      const panel = document.getElementById('agent-details');
+      panel.classList.add('visible');
+
+      document.getElementById('agent-details-icon').textContent = agent.icon;
+      document.getElementById('agent-details-name').textContent = agent.name;
+      document.getElementById('agent-details-role').textContent = agent.role || agent.description.split('.')[0];
+      document.getElementById('agent-details-source').textContent = agent.source === 'file' ? 'Custom' : 'Built-in';
+      document.getElementById('agent-details-desc').textContent = agent.description;
+
+      // Render capabilities
+      const capsList = document.getElementById('agent-details-caps');
+      capsList.innerHTML = (agent.capabilities || []).map(c => \`<li>\${c}</li>\`).join('');
+
+      // Show example toggle if agent has an example
+      const toggleContainer = document.getElementById('example-toggle-container');
+      const examplePanel = document.getElementById('example-panel');
+
+      if (agent.example && (agent.example.input || agent.example.output)) {
+        toggleContainer.style.display = 'flex';
+        document.getElementById('example-input').textContent = agent.example.input || '(no input)';
+        document.getElementById('example-output').textContent = agent.example.output || '(no output)';
+
+        // Reset toggle state
+        document.getElementById('show-example-toggle').checked = false;
+        examplePanel.classList.remove('visible');
+      } else {
+        toggleContainer.style.display = 'none';
+        examplePanel.classList.remove('visible');
+      }
+    }
+
+    function hideAgentDetails() {
+      document.getElementById('agent-details').classList.remove('visible');
+    }
+
+    function toggleExample() {
+      const checkbox = document.getElementById('show-example-toggle');
+      const panel = document.getElementById('example-panel');
+      if (checkbox.checked) {
+        panel.classList.add('visible');
+      } else {
+        panel.classList.remove('visible');
+      }
     }
 
     function selectWorkflow(id) {
       selectedWorkflowId = id;
       selectedAgentId = null;
+      hideAgentDetails();
       renderAgents();
       renderWorkflows();
       updateOutput('Workflow selected. Enter a prompt and click Run.');

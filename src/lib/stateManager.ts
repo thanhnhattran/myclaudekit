@@ -25,6 +25,7 @@ export class StateManager extends EventEmitter {
   // Token Stats Management
 
   private loadTokenStats(): ProjectTokenStats {
+    const now = Date.now();
     const defaultStats: ProjectTokenStats = {
       totalInputTokens: 0,
       totalOutputTokens: 0,
@@ -32,13 +33,20 @@ export class StateManager extends EventEmitter {
       totalCost: 0,
       sessionCount: 0,
       byAgent: {} as Record<AgentRole, TokenUsage>,
-      lastUpdated: Date.now()
+      lastUpdated: now,
+      sessionStartTime: now,
+      lastResetTime: now
     };
 
     if (this.context) {
       const saved = this.context.globalState.get<ProjectTokenStats>('claudekit.tokenStats');
       if (saved) {
-        return saved;
+        // Ensure session tracking fields exist
+        return {
+          ...saved,
+          sessionStartTime: saved.sessionStartTime || now,
+          lastResetTime: saved.lastResetTime || now
+        };
       }
     }
     return defaultStats;
@@ -55,11 +63,14 @@ export class StateManager extends EventEmitter {
   }
 
   public addTokenUsage(agentId: AgentRole, usage: TokenUsage, model: string): void {
-    // Calculate cost
-    const pricing = TOKEN_PRICING[model] || TOKEN_PRICING['claude-sonnet-4-5-20250929'];
-    const cost = (usage.inputTokens / 1_000_000 * pricing.input) +
-                 (usage.outputTokens / 1_000_000 * pricing.output);
-    usage.cost = cost;
+    // Use cost from response if available, otherwise calculate
+    let cost = usage.cost;
+    if (cost === undefined) {
+      const pricing = TOKEN_PRICING[model] || TOKEN_PRICING['claude-sonnet-4-5-20250929'];
+      cost = (usage.inputTokens / 1_000_000 * pricing.input) +
+             (usage.outputTokens / 1_000_000 * pricing.output);
+      usage.cost = cost;
+    }
 
     // Update totals
     this.tokenStats.totalInputTokens += usage.inputTokens;
@@ -88,6 +99,7 @@ export class StateManager extends EventEmitter {
   }
 
   public resetTokenStats(): void {
+    const now = Date.now();
     this.tokenStats = {
       totalInputTokens: 0,
       totalOutputTokens: 0,
@@ -95,7 +107,9 @@ export class StateManager extends EventEmitter {
       totalCost: 0,
       sessionCount: 0,
       byAgent: {} as Record<AgentRole, TokenUsage>,
-      lastUpdated: Date.now()
+      lastUpdated: now,
+      sessionStartTime: now,
+      lastResetTime: now
     };
     this.saveTokenStats();
     this.emit('tokenStatsChanged', this.tokenStats);

@@ -2,64 +2,81 @@ import { spawn, ChildProcess } from 'child_process';
 import { AgentConfig, RunnerOptions, RunResult, TokenUsage } from '../types';
 import { PromptManager } from './promptManager';
 
-// Regex patterns to extract token usage from claude CLI output
-const TOKEN_PATTERNS = {
-  // Pattern: "Input tokens: 1234" or "input_tokens: 1234"
-  input: /(?:input[_\s]?tokens?|prompt[_\s]?tokens?)[\s:]+(\d+)/i,
-  // Pattern: "Output tokens: 1234" or "output_tokens: 1234"
-  output: /(?:output[_\s]?tokens?|completion[_\s]?tokens?)[\s:]+(\d+)/i,
-  // Pattern: "Total tokens: 1234" or "total_tokens: 1234"
-  total: /(?:total[_\s]?tokens?)[\s:]+(\d+)/i,
-  // JSON pattern: {"input_tokens": 1234, "output_tokens": 5678}
-  json: /"(?:input_tokens?|prompt_tokens?)"\s*:\s*(\d+).*?"(?:output_tokens?|completion_tokens?)"\s*:\s*(\d+)/i
-};
+/**
+ * Claude CLI JSON response structure
+ */
+interface ClaudeJsonResponse {
+  type: string;
+  subtype: string;
+  is_error: boolean;
+  duration_ms: number;
+  duration_api_ms: number;
+  num_turns: number;
+  result: string;
+  session_id: string;
+  total_cost_usd: number;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    server_tool_use?: {
+      web_search_requests: number;
+    };
+    service_tier?: string;
+  };
+}
 
-function parseTokenUsage(output: string): TokenUsage | undefined {
+/**
+ * Parse Claude CLI JSON response to extract token usage
+ */
+function parseClaudeJsonResponse(jsonOutput: string): { result: string; tokenUsage?: TokenUsage; cost?: number } | null {
   try {
-    // Try JSON pattern first
-    const jsonMatch = output.match(TOKEN_PATTERNS.json);
-    if (jsonMatch) {
-      const input = parseInt(jsonMatch[1], 10);
-      const outputTokens = parseInt(jsonMatch[2], 10);
-      return {
-        inputTokens: input,
-        outputTokens: outputTokens,
-        totalTokens: input + outputTokens
-      };
-    }
+    const response: ClaudeJsonResponse = JSON.parse(jsonOutput.trim());
 
-    // Try individual patterns
-    const inputMatch = output.match(TOKEN_PATTERNS.input);
-    const outputMatch = output.match(TOKEN_PATTERNS.output);
+    const inputTokens = (response.usage?.input_tokens || 0) +
+                        (response.usage?.cache_creation_input_tokens || 0) +
+                        (response.usage?.cache_read_input_tokens || 0);
+    const outputTokens = response.usage?.output_tokens || 0;
 
-    if (inputMatch || outputMatch) {
-      const input = inputMatch ? parseInt(inputMatch[1], 10) : 0;
-      const outputTokens = outputMatch ? parseInt(outputMatch[1], 10) : 0;
-
-      const totalMatch = output.match(TOKEN_PATTERNS.total);
-      const total = totalMatch ? parseInt(totalMatch[1], 10) : input + outputTokens;
-
-      return {
-        inputTokens: input,
-        outputTokens: outputTokens,
-        totalTokens: total
-      };
-    }
-
-    // Estimate tokens if no explicit count found (rough: 4 chars per token)
-    const estimatedTokens = Math.ceil(output.length / 4);
-    if (estimatedTokens > 0) {
-      return {
-        inputTokens: 0, // Can't estimate input without knowing prompt
-        outputTokens: estimatedTokens,
-        totalTokens: estimatedTokens
-      };
-    }
-
-    return undefined;
+    return {
+      result: response.result || '',
+      tokenUsage: {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        cost: response.total_cost_usd
+      },
+      cost: response.total_cost_usd
+    };
   } catch {
-    return undefined;
+    return null;
   }
+}
+
+/**
+ * Fallback: Parse token usage from text output using regex patterns
+ */
+function parseTokenUsageFromText(output: string): TokenUsage | undefined {
+  const patterns = {
+    input: /(?:input[_\s]?tokens?|prompt[_\s]?tokens?)[\s:]+(\d+)/i,
+    output: /(?:output[_\s]?tokens?|completion[_\s]?tokens?)[\s:]+(\d+)/i,
+    total: /(?:total[_\s]?tokens?)[\s:]+(\d+)/i
+  };
+
+  const inputMatch = output.match(patterns.input);
+  const outputMatch = output.match(patterns.output);
+
+  if (inputMatch || outputMatch) {
+    const input = inputMatch ? parseInt(inputMatch[1], 10) : 0;
+    const outputTokens = outputMatch ? parseInt(outputMatch[1], 10) : 0;
+    const totalMatch = output.match(patterns.total);
+    const total = totalMatch ? parseInt(totalMatch[1], 10) : input + outputTokens;
+
+    return { inputTokens: input, outputTokens, totalTokens: total };
+  }
+
+  return undefined;
 }
 
 export class AgentRunner {
@@ -97,15 +114,15 @@ export class AgentRunner {
         this.currentProcess.stdout?.on('data', (data: Buffer) => {
           const chunk = data.toString();
           output += chunk;
+          // For JSON output, we'll parse at the end - just show progress indicator
           if (onOutput) {
-            onOutput(chunk);
+            onOutput('.');
           }
         });
 
         this.currentProcess.stderr?.on('data', (data: Buffer) => {
           const chunk = data.toString();
           errorOutput += chunk;
-          // Also stream stderr to output for visibility
           if (onOutput) {
             onOutput(`[stderr] ${chunk}`);
           }
@@ -114,24 +131,41 @@ export class AgentRunner {
         this.currentProcess.on('close', (code) => {
           this.currentProcess = null;
 
-          // Parse token usage from output
-          const tokenUsage = parseTokenUsage(output + errorOutput);
+          // Try to parse JSON response first
+          const jsonResponse = parseClaudeJsonResponse(output);
 
-          if (code === 0) {
+          if (jsonResponse) {
+            // Successfully parsed JSON - show actual result
+            if (onOutput) {
+              onOutput('\n' + jsonResponse.result);
+            }
+
             resolve({
-              success: true,
-              output: output.trim(),
-              exitCode: code,
-              tokenUsage
+              success: code === 0 && !jsonResponse.result.includes('error'),
+              output: jsonResponse.result,
+              exitCode: code ?? 0,
+              tokenUsage: jsonResponse.tokenUsage
             });
           } else {
-            resolve({
-              success: false,
-              output: output.trim(),
-              error: errorOutput.trim() || `Process exited with code ${code}`,
-              exitCode: code ?? undefined,
-              tokenUsage
-            });
+            // Fallback to text parsing
+            const tokenUsage = parseTokenUsageFromText(output + errorOutput);
+
+            if (code === 0) {
+              resolve({
+                success: true,
+                output: output.trim(),
+                exitCode: code,
+                tokenUsage
+              });
+            } else {
+              resolve({
+                success: false,
+                output: output.trim(),
+                error: errorOutput.trim() || `Process exited with code ${code}`,
+                exitCode: code ?? undefined,
+                tokenUsage
+              });
+            }
           }
         });
 
@@ -175,8 +209,9 @@ export class AgentRunner {
       args.push('--model', model);
     }
 
-    // Add print mode for non-interactive output
+    // Add print mode for non-interactive output with JSON format for token tracking
     args.push('--print');
+    args.push('--output-format', 'json');
 
     // Add the prompt
     args.push('--prompt', prompt);

@@ -30,6 +30,14 @@ export interface AgentConfig {
   systemPrompt: string;
   capabilities: string[];
   model?: string;
+  role?: string;           // Short role description (e.g., "Planning & Research")
+  example?: AgentExample;  // Input/Output example
+  source?: 'file' | 'builtin';  // Where the agent config comes from
+}
+
+export interface AgentExample {
+  input: string;
+  output: string;
 }
 
 export interface TokenUsage {
@@ -58,6 +66,9 @@ export interface ProjectTokenStats {
   sessionCount: number;
   byAgent: Record<AgentRole, TokenUsage>;
   lastUpdated: number;
+  // Session tracking
+  sessionStartTime?: number;      // When this tracking session started
+  lastResetTime?: number;         // When stats were last reset
 }
 
 // Workflow Types

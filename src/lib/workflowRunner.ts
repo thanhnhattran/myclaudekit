@@ -2,6 +2,7 @@ import { AgentRunner } from './runner';
 import { PromptManager } from './promptManager';
 import { StateManager } from './stateManager';
 import {
+  AgentConfig,
   AgentRole,
   AgentState,
   Workflow,
@@ -9,9 +10,10 @@ import {
   RunnerOptions,
   RunResult
 } from '../types';
-import { getAgent } from '../agents/agents.config';
+import { getAgent as getBuiltinAgent } from '../agents/agents.config';
 
 export interface WorkflowRunnerOptions extends RunnerOptions {
+  agents?: AgentConfig[];  // Optional agents list (includes file-based + builtin)
   onAgentStart?: (agentId: AgentRole) => void;
   onAgentOutput?: (agentId: AgentRole, chunk: string) => void;
   onAgentComplete?: (agentId: AgentRole, result: RunResult) => void;
@@ -30,6 +32,16 @@ export class WorkflowRunner {
     this.options = options;
     this.stateManager = stateManager;
     this.promptManager = new PromptManager();
+  }
+
+  /**
+   * Get agent by ID - uses provided agents list or falls back to builtins
+   */
+  private getAgent(agentId: AgentRole): AgentConfig | undefined {
+    if (this.options.agents) {
+      return this.options.agents.find(a => a.id === agentId);
+    }
+    return getBuiltinAgent(agentId);
   }
 
   /**
@@ -98,7 +110,7 @@ export class WorkflowRunner {
     for (const step of workflow.steps) {
       if (!this.isRunning) break;
 
-      const agent = getAgent(step.agentId);
+      const agent = this.getAgent(step.agentId);
       if (!agent) continue;
 
       // Build prompt with context from previous agents
@@ -183,7 +195,7 @@ export class WorkflowRunner {
     prompt: string,
     retryCount = 0
   ): Promise<RunResult> {
-    const agent = getAgent(agentId);
+    const agent = this.getAgent(agentId);
     if (!agent) {
       return { success: false, output: '', error: `Agent ${agentId} not found` };
     }

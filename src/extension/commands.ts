@@ -4,7 +4,6 @@ import { AgentViewProvider } from './agentViewProvider';
 import { AgentRunner } from '../lib/runner';
 import { WorkflowRunner, WORKFLOW_TEMPLATES } from '../lib/workflowRunner';
 import { AgentRole, Workflow } from '../types';
-import { AGENTS } from '../agents/agents.config';
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -20,9 +19,12 @@ export function registerCommands(
   const runAgentCmd = vscode.commands.registerCommand(
     'claudekit.runAgent',
     async (agentId?: AgentRole) => {
+      // Get agents from provider (includes file-based and builtin)
+      const agents = viewProvider.getAgents();
+
       // If no agentId provided, show quick pick
       if (!agentId) {
-        const items = AGENTS.map(agent => ({
+        const items = agents.map(agent => ({
           label: `${agent.icon} ${agent.name}`,
           description: agent.description,
           agentId: agent.id
@@ -65,7 +67,7 @@ export function registerCommands(
         workingDirectory
       });
 
-      const agent = AGENTS.find(a => a.id === agentId);
+      const agent = agents.find(a => a.id === agentId);
       if (!agent) {
         vscode.window.showErrorMessage(`Agent ${agentId} not found`);
         return;
@@ -167,6 +169,8 @@ export function registerCommands(
   const stopAgentCmd = vscode.commands.registerCommand(
     'claudekit.stopAgent',
     async (agentId?: AgentRole) => {
+      const agents = viewProvider.getAgents();
+
       if (!agentId) {
         // Show running agents
         const runningAgents = stateManager.getRunningAgents();
@@ -176,7 +180,7 @@ export function registerCommands(
         }
 
         const items = runningAgents.map(state => {
-          const agent = AGENTS.find(a => a.id === state.id);
+          const agent = agents.find(a => a.id === state.id);
           return {
             label: `${agent?.icon || ''} ${agent?.name || state.id}`,
             description: 'Running',
@@ -212,6 +216,8 @@ export function registerCommands(
   const runWorkflowCmd = vscode.commands.registerCommand(
     'claudekit.runWorkflow',
     async (workflowId?: string) => {
+      const agents = viewProvider.getAgents();
+
       // If no workflowId provided, show quick pick
       let workflow: Workflow | undefined;
 
@@ -220,7 +226,7 @@ export function registerCommands(
           label: w.name,
           description: `${w.pattern} - ${w.steps.length} agents`,
           detail: w.steps.map(s => {
-            const agent = AGENTS.find(a => a.id === s.agentId);
+            const agent = agents.find(a => a.id === s.agentId);
             return agent?.icon || s.agentId;
           }).join(' → '),
           workflow: w
@@ -275,8 +281,9 @@ export function registerCommands(
           maxRetries,
           model,
           workingDirectory,
+          agents,  // Pass agents list to workflow runner
           onAgentStart: (agentId) => {
-            const agent = AGENTS.find(a => a.id === agentId);
+            const agent = agents.find(a => a.id === agentId);
             outputChannel.appendLine(`\n${agent?.icon || '🤖'} Starting ${agent?.name || agentId}...`);
 
             // Update webview
@@ -301,7 +308,7 @@ export function registerCommands(
             }
           },
           onAgentComplete: (agentId, _result) => {
-            const agent = AGENTS.find(a => a.id === agentId);
+            const agent = agents.find(a => a.id === agentId);
             outputChannel.appendLine(`\n✅ ${agent?.name || agentId} completed`);
 
             viewProvider.sendMessage({
