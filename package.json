@@ -42,6 +42,10 @@
       {
         "command": "claudekit.runWorkflow",
         "title": "ClaudeKit: Run Workflow"
+      },
+      {
+        "command": "claudekit.stopWorkflow",
+        "title": "ClaudeKit: Stop All Agents"
       }
     ],
     "viewsContainers": {

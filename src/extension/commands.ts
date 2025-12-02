@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { StateManager } from '../lib/stateManager';
 import { AgentViewProvider } from './agentViewProvider';
 import { AgentRunner } from '../lib/runner';
-import { AgentRole } from '../types';
+import { WorkflowRunner, WORKFLOW_TEMPLATES } from '../lib/workflowRunner';
+import { AgentRole, Workflow } from '../types';
 import { AGENTS } from '../agents/agents.config';
 
 export function registerCommands(
@@ -196,11 +197,136 @@ export function registerCommands(
   // Command: Run Workflow
   const runWorkflowCmd = vscode.commands.registerCommand(
     'claudekit.runWorkflow',
-    async () => {
-      // TODO: Implement workflow picker and execution
-      vscode.window.showInformationMessage('Workflow execution coming soon!');
+    async (workflowId?: string) => {
+      // If no workflowId provided, show quick pick
+      let workflow: Workflow | undefined;
+
+      if (!workflowId) {
+        const items = WORKFLOW_TEMPLATES.map(w => ({
+          label: w.name,
+          description: `${w.pattern} - ${w.steps.length} agents`,
+          detail: w.steps.map(s => {
+            const agent = AGENTS.find(a => a.id === s.agentId);
+            return agent?.icon || s.agentId;
+          }).join(' → '),
+          workflow: w
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a workflow to run'
+        });
+
+        if (!selected) {
+          return;
+        }
+        workflow = selected.workflow;
+      } else {
+        workflow = WORKFLOW_TEMPLATES.find(w => w.id === workflowId);
+      }
+
+      if (!workflow) {
+        vscode.window.showErrorMessage('Workflow not found');
+        return;
+      }
+
+      // Get user prompt
+      const prompt = await vscode.window.showInputBox({
+        prompt: `Enter your prompt for "${workflow.name}" workflow`,
+        placeHolder: 'Describe what you want to accomplish...'
+      });
+
+      if (!prompt) {
+        return;
+      }
+
+      // Get configuration
+      const config = vscode.workspace.getConfiguration('claudekit');
+      const cliPath = config.get<string>('claudeCliPath', 'claude');
+      const maxRetries = config.get<number>('maxRetries', 3);
+      const model = config.get<string>('defaultModel', 'claude-opus-4-5-20251101');
+      const workingDirectory = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+
+      // Create output channel for workflow
+      const outputChannel = vscode.window.createOutputChannel(`ClaudeKit: ${workflow.name}`);
+      outputChannel.show();
+      outputChannel.appendLine(`Starting workflow: ${workflow.name}`);
+      outputChannel.appendLine(`Pattern: ${workflow.pattern}`);
+      outputChannel.appendLine(`Agents: ${workflow.steps.map(s => s.agentId).join(' → ')}`);
+      outputChannel.appendLine('─'.repeat(50));
+
+      // Create workflow runner
+      const workflowRunner = new WorkflowRunner(
+        {
+          cliPath,
+          maxRetries,
+          model,
+          workingDirectory,
+          onAgentStart: (agentId) => {
+            const agent = AGENTS.find(a => a.id === agentId);
+            outputChannel.appendLine(`\n${agent?.icon || '🤖'} Starting ${agent?.name || agentId}...`);
+
+            // Update webview
+            viewProvider.sendMessage({
+              type: 'agentUpdate',
+              payload: {
+                agentId,
+                state: stateManager.getAgentState(agentId)!
+              }
+            });
+          },
+          onAgentOutput: (agentId, chunk) => {
+            outputChannel.append(chunk);
+
+            // Update webview with streaming output
+            const state = stateManager.getAgentState(agentId);
+            if (state) {
+              viewProvider.sendMessage({
+                type: 'agentUpdate',
+                payload: { agentId, state }
+              });
+            }
+          },
+          onAgentComplete: (agentId, _result) => {
+            const agent = AGENTS.find(a => a.id === agentId);
+            outputChannel.appendLine(`\n✅ ${agent?.name || agentId} completed`);
+
+            viewProvider.sendMessage({
+              type: 'agentUpdate',
+              payload: {
+                agentId,
+                state: stateManager.getAgentState(agentId)!
+              }
+            });
+          },
+          onWorkflowComplete: (_wfId, outputs) => {
+            outputChannel.appendLine('\n' + '─'.repeat(50));
+            outputChannel.appendLine(`✅ Workflow "${workflow!.name}" completed!`);
+            outputChannel.appendLine(`Completed agents: ${outputs.size}`);
+          }
+        },
+        stateManager
+      );
+
+      try {
+        vscode.window.showInformationMessage(`Starting workflow: ${workflow.name}`);
+        await workflowRunner.execute(workflow, prompt);
+        vscode.window.showInformationMessage(`Workflow "${workflow.name}" completed!`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`\n❌ Workflow error: ${errorMessage}`);
+        vscode.window.showErrorMessage(`Workflow error: ${errorMessage}`);
+      }
     }
   );
 
-  context.subscriptions.push(openPanelCmd, runAgentCmd, stopAgentCmd, runWorkflowCmd);
+  // Command: Stop Workflow
+  const stopWorkflowCmd = vscode.commands.registerCommand(
+    'claudekit.stopWorkflow',
+    async () => {
+      stateManager.stopAllAgents();
+      vscode.window.showInformationMessage('All agents stopped');
+    }
+  );
+
+  context.subscriptions.push(openPanelCmd, runAgentCmd, stopAgentCmd, runWorkflowCmd, stopWorkflowCmd);
 }
