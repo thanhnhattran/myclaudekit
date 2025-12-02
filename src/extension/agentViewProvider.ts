@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StateManager } from '../lib/stateManager';
-import { Message, RunAgentPayload, StopAgentPayload } from '../types';
+import { Message, RunAgentPayload, StopAgentPayload, ProjectTokenStats } from '../types';
 import { AGENTS } from '../agents/agents.config';
 
 export class AgentViewProvider implements vscode.WebviewViewProvider {
@@ -9,7 +9,15 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _stateManager: StateManager
-  ) {}
+  ) {
+    // Listen for token stats changes
+    this._stateManager.on('tokenStatsChanged', (stats: ProjectTokenStats) => {
+      this.sendMessage({
+        type: 'tokenUpdate',
+        payload: stats
+      });
+    });
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -58,6 +66,18 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
       case 'runWorkflow':
         vscode.commands.executeCommand('claudekit.runWorkflow');
+        break;
+
+      case 'getTokenStats':
+        this.sendMessage({
+          type: 'tokenUpdate',
+          payload: this._stateManager.getTokenStats()
+        });
+        break;
+
+      case 'resetTokenStats':
+        this._stateManager.resetTokenStats();
+        vscode.window.showInformationMessage('Token statistics reset');
         break;
 
       default:
@@ -167,6 +187,18 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
     /* Empty state */
     .empty-state { text-align: center; padding: 20px; color: var(--muted); }
+
+    /* Token Stats Panel */
+    .token-stats { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+    .token-stats-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .token-stats-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+    .token-stats-reset { font-size: 10px; color: var(--muted); cursor: pointer; text-decoration: underline; }
+    .token-stats-reset:hover { color: var(--fg); }
+    .token-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .token-stat { text-align: center; }
+    .token-stat-value { font-size: 16px; font-weight: 600; color: var(--fg); }
+    .token-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+    .token-stat-cost { color: var(--success); }
   </style>
 </head>
 <body>
@@ -176,6 +208,31 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       <h1>ClaudeKit</h1>
       <div class="header-actions">
         <button class="icon-btn" onclick="stopAll()" title="Stop All">⏹</button>
+      </div>
+    </div>
+
+    <div class="token-stats" id="token-stats">
+      <div class="token-stats-header">
+        <span class="token-stats-title">📊 Token Usage</span>
+        <span class="token-stats-reset" onclick="resetTokenStats()">Reset</span>
+      </div>
+      <div class="token-stats-grid">
+        <div class="token-stat">
+          <div class="token-stat-value" id="total-tokens">0</div>
+          <div class="token-stat-label">Total Tokens</div>
+        </div>
+        <div class="token-stat">
+          <div class="token-stat-value token-stat-cost" id="total-cost">$0.00</div>
+          <div class="token-stat-label">Est. Cost</div>
+        </div>
+        <div class="token-stat">
+          <div class="token-stat-value" id="input-tokens">0</div>
+          <div class="token-stat-label">Input</div>
+        </div>
+        <div class="token-stat">
+          <div class="token-stat-value" id="output-tokens">0</div>
+          <div class="token-stat-label">Output</div>
+        </div>
       </div>
     </div>
 
@@ -225,6 +282,7 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
     // Initialize
     vscode.postMessage({ type: 'getAgents', payload: {} });
+    vscode.postMessage({ type: 'getTokenStats', payload: {} });
     renderWorkflows();
     setupTabs();
 
@@ -245,7 +303,29 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       const { type, payload } = event.data;
       if (type === 'agentsList') { agents = payload; renderAgents(); }
       if (type === 'agentUpdate') { updateAgentState(payload.agentId, payload.state); }
+      if (type === 'tokenUpdate') { updateTokenStats(payload); }
     });
+
+    // Token stats functions
+    function updateTokenStats(stats) {
+      if (!stats) return;
+      document.getElementById('total-tokens').textContent = formatNumber(stats.totalTokens);
+      document.getElementById('input-tokens').textContent = formatNumber(stats.totalInputTokens);
+      document.getElementById('output-tokens').textContent = formatNumber(stats.totalOutputTokens);
+      document.getElementById('total-cost').textContent = '$' + stats.totalCost.toFixed(4);
+    }
+
+    function resetTokenStats() {
+      if (confirm('Reset all token statistics?')) {
+        vscode.postMessage({ type: 'resetTokenStats', payload: {} });
+      }
+    }
+
+    function formatNumber(num) {
+      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+      return num.toString();
+    }
 
     function renderAgents() {
       const grid = document.getElementById('agents-grid');

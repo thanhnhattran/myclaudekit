@@ -110,18 +110,32 @@ export function registerCommands(
           }
         });
 
-        // Update final state
+        // Update final state with token usage
         stateManager.updateAgentState(agentId, {
           id: agentId,
           status: result.success ? 'completed' : 'error',
           output: result.output,
           error: result.error,
           retryCount: 0,
-          endTime: Date.now()
+          endTime: Date.now(),
+          tokenUsage: result.tokenUsage
         });
 
+        // Track token usage
+        if (result.tokenUsage) {
+          stateManager.addTokenUsage(agentId, result.tokenUsage, model);
+          // Send token stats update to webview
+          viewProvider.sendMessage({
+            type: 'tokenUpdate',
+            payload: stateManager.getTokenStats()
+          });
+        }
+
         if (result.success) {
-          vscode.window.showInformationMessage(`Agent ${agent.name} completed successfully`);
+          const tokenInfo = result.tokenUsage
+            ? ` (${result.tokenUsage.totalTokens} tokens)`
+            : '';
+          vscode.window.showInformationMessage(`Agent ${agent.name} completed${tokenInfo}`);
         } else {
           vscode.window.showErrorMessage(`Agent ${agent.name} failed: ${result.error}`);
         }

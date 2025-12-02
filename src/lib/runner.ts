@@ -1,6 +1,66 @@
 import { spawn, ChildProcess } from 'child_process';
-import { AgentConfig, RunnerOptions, RunResult } from '../types';
+import { AgentConfig, RunnerOptions, RunResult, TokenUsage } from '../types';
 import { PromptManager } from './promptManager';
+
+// Regex patterns to extract token usage from claude CLI output
+const TOKEN_PATTERNS = {
+  // Pattern: "Input tokens: 1234" or "input_tokens: 1234"
+  input: /(?:input[_\s]?tokens?|prompt[_\s]?tokens?)[\s:]+(\d+)/i,
+  // Pattern: "Output tokens: 1234" or "output_tokens: 1234"
+  output: /(?:output[_\s]?tokens?|completion[_\s]?tokens?)[\s:]+(\d+)/i,
+  // Pattern: "Total tokens: 1234" or "total_tokens: 1234"
+  total: /(?:total[_\s]?tokens?)[\s:]+(\d+)/i,
+  // JSON pattern: {"input_tokens": 1234, "output_tokens": 5678}
+  json: /"(?:input_tokens?|prompt_tokens?)"\s*:\s*(\d+).*?"(?:output_tokens?|completion_tokens?)"\s*:\s*(\d+)/i
+};
+
+function parseTokenUsage(output: string): TokenUsage | undefined {
+  try {
+    // Try JSON pattern first
+    const jsonMatch = output.match(TOKEN_PATTERNS.json);
+    if (jsonMatch) {
+      const input = parseInt(jsonMatch[1], 10);
+      const outputTokens = parseInt(jsonMatch[2], 10);
+      return {
+        inputTokens: input,
+        outputTokens: outputTokens,
+        totalTokens: input + outputTokens
+      };
+    }
+
+    // Try individual patterns
+    const inputMatch = output.match(TOKEN_PATTERNS.input);
+    const outputMatch = output.match(TOKEN_PATTERNS.output);
+
+    if (inputMatch || outputMatch) {
+      const input = inputMatch ? parseInt(inputMatch[1], 10) : 0;
+      const outputTokens = outputMatch ? parseInt(outputMatch[1], 10) : 0;
+
+      const totalMatch = output.match(TOKEN_PATTERNS.total);
+      const total = totalMatch ? parseInt(totalMatch[1], 10) : input + outputTokens;
+
+      return {
+        inputTokens: input,
+        outputTokens: outputTokens,
+        totalTokens: total
+      };
+    }
+
+    // Estimate tokens if no explicit count found (rough: 4 chars per token)
+    const estimatedTokens = Math.ceil(output.length / 4);
+    if (estimatedTokens > 0) {
+      return {
+        inputTokens: 0, // Can't estimate input without knowing prompt
+        outputTokens: estimatedTokens,
+        totalTokens: estimatedTokens
+      };
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export class AgentRunner {
   private options: RunnerOptions;
@@ -54,18 +114,23 @@ export class AgentRunner {
         this.currentProcess.on('close', (code) => {
           this.currentProcess = null;
 
+          // Parse token usage from output
+          const tokenUsage = parseTokenUsage(output + errorOutput);
+
           if (code === 0) {
             resolve({
               success: true,
               output: output.trim(),
-              exitCode: code
+              exitCode: code,
+              tokenUsage
             });
           } else {
             resolve({
               success: false,
               output: output.trim(),
               error: errorOutput.trim() || `Process exited with code ${code}`,
-              exitCode: code ?? undefined
+              exitCode: code ?? undefined,
+              tokenUsage
             });
           }
         });

@@ -32,6 +32,13 @@ export interface AgentConfig {
   model?: string;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cost?: number; // USD
+}
+
 export interface AgentState {
   id: AgentRole;
   status: AgentStatus;
@@ -40,6 +47,17 @@ export interface AgentState {
   startTime?: number;
   endTime?: number;
   retryCount: number;
+  tokenUsage?: TokenUsage;
+}
+
+export interface ProjectTokenStats {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  totalCost: number;
+  sessionCount: number;
+  byAgent: Record<AgentRole, TokenUsage>;
+  lastUpdated: number;
 }
 
 // Workflow Types
@@ -80,6 +98,7 @@ export interface RunResult {
   output: string;
   error?: string;
   exitCode?: number;
+  tokenUsage?: TokenUsage;
 }
 
 // Message Types (Extension <-> Webview communication)
@@ -92,6 +111,9 @@ export type MessageType =
   | 'workflowUpdate'
   | 'getAgents'
   | 'agentsList'
+  | 'tokenUpdate'
+  | 'getTokenStats'
+  | 'resetTokenStats'
   | 'error';
 
 export interface Message<T = unknown> {

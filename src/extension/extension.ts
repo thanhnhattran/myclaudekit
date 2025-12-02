@@ -11,9 +11,10 @@ export function activate(context: vscode.ExtensionContext) {
   outputChannel.appendLine('ClaudeKit is activating...');
 
   try {
-    // Initialize State Manager
-    stateManager = new StateManager();
+    // Initialize State Manager with context for persistence
+    stateManager = new StateManager(context);
     outputChannel.appendLine('StateManager initialized');
+    outputChannel.appendLine(`Token stats loaded: ${stateManager.getTokenStats().totalTokens} total tokens`);
 
     // Register the Webview Provider
     const agentViewProvider = new AgentViewProvider(context.extensionUri, stateManager);
