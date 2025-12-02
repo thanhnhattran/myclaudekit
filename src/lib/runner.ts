@@ -154,6 +154,10 @@ export class AgentRunner {
 
           // Try to parse JSON response first
           const jsonResponse = parseClaudeJsonResponse(output);
+          console.log('[ClaudeKit] JSON parsed:', jsonResponse !== null);
+          if (jsonResponse?.tokenUsage) {
+            console.log('[ClaudeKit] Token usage:', JSON.stringify(jsonResponse.tokenUsage));
+          }
 
           if (jsonResponse) {
             // Successfully parsed JSON - show actual result
