@@ -213,8 +213,8 @@ export class AgentRunner {
     args.push('--print');
     args.push('--output-format', 'json');
 
-    // Add the prompt
-    args.push('--prompt', prompt);
+    // Add the prompt as positional argument (not a flag)
+    args.push(prompt);
 
     return args;
   }
