@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { AgentConfig, RunnerOptions, RunResult, TokenUsage } from '../types';
 import { PromptManager } from './promptManager';
+import { getModelForTier, TIER_INFO } from './models';
 
 /**
  * Claude CLI JSON response structure
@@ -28,9 +29,14 @@ interface ClaudeJsonResponse {
 }
 
 /**
- * Parse Claude CLI JSON response to extract token usage
+ * Parse Claude CLI JSON response to extract token usage and session ID
  */
-function parseClaudeJsonResponse(jsonOutput: string): { result: string; tokenUsage?: TokenUsage; cost?: number } | null {
+function parseClaudeJsonResponse(jsonOutput: string): {
+  result: string;
+  tokenUsage?: TokenUsage;
+  cost?: number;
+  sessionId?: string;
+} | null {
   try {
     const response: ClaudeJsonResponse = JSON.parse(jsonOutput.trim());
 
@@ -47,7 +53,8 @@ function parseClaudeJsonResponse(jsonOutput: string): { result: string; tokenUsa
         totalTokens: inputTokens + outputTokens,
         cost: response.total_cost_usd
       },
-      cost: response.total_cost_usd
+      cost: response.total_cost_usd,
+      sessionId: response.session_id
     };
   } catch {
     return null;
@@ -92,11 +99,15 @@ export class AgentRunner {
   public async run(
     agent: AgentConfig,
     userPrompt: string,
-    onOutput?: (chunk: string) => void
+    onOutput?: (chunk: string) => void,
+    resumeSessionId?: string
   ): Promise<RunResult> {
     return new Promise((resolve) => {
-      const fullPrompt = this.promptManager.buildPrompt(agent, userPrompt);
-      const args = this.buildCliArgs(agent);
+      // When resuming, don't add system prompt - context is already in session
+      const promptToSend = resumeSessionId
+        ? userPrompt
+        : this.promptManager.buildPrompt(agent, userPrompt);
+      const args = this.buildCliArgs(agent, resumeSessionId);
 
       let output = '';
       let errorOutput = '';
@@ -117,8 +128,11 @@ export class AgentRunner {
 
         // Write prompt to stdin (safer than CLI arg for long/complex prompts)
         if (this.currentProcess.stdin) {
-          console.log('[ClaudeKit] Writing prompt to stdin, length:', fullPrompt.length);
-          this.currentProcess.stdin.write(fullPrompt);
+          console.log('[ClaudeKit] Writing prompt to stdin, length:', promptToSend.length);
+          if (resumeSessionId) {
+            console.log('[ClaudeKit] Resuming session:', resumeSessionId);
+          }
+          this.currentProcess.stdin.write(promptToSend);
           this.currentProcess.stdin.end();
         } else {
           console.error('[ClaudeKit] stdin is not available!');
@@ -169,7 +183,8 @@ export class AgentRunner {
               success: code === 0 && !jsonResponse.result.includes('error'),
               output: jsonResponse.result,
               exitCode: code ?? 0,
-              tokenUsage: jsonResponse.tokenUsage
+              tokenUsage: jsonResponse.tokenUsage,
+              sessionId: jsonResponse.sessionId
             });
           } else {
             // Fallback to text parsing
@@ -225,11 +240,26 @@ export class AgentRunner {
     return this.currentProcess !== null;
   }
 
-  private buildCliArgs(agent: AgentConfig): string[] {
+  private buildCliArgs(agent: AgentConfig, resumeSessionId?: string): string[] {
     const args: string[] = [];
 
-    // Add model if specified
-    const model = agent.model || this.options.model;
+    // Resume session if provided (HUGE token savings - reuses context)
+    if (resumeSessionId) {
+      args.push('--resume', resumeSessionId);
+      console.log(`[ClaudeKit] Adding --resume ${resumeSessionId}`);
+    }
+
+    // Determine model: explicit > recommendedModel tier > global default
+    let model = agent.model;
+    if (!model && agent.recommendedModel) {
+      model = getModelForTier(agent.recommendedModel);
+      const tierInfo = TIER_INFO[agent.recommendedModel];
+      console.log(`[ClaudeKit] Using recommended model tier "${agent.recommendedModel}" (${tierInfo.name}) for ${agent.name}`);
+    }
+    if (!model) {
+      model = this.options.model;
+    }
+
     if (model) {
       args.push('--model', model);
     }

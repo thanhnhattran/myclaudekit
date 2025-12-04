@@ -22,6 +22,19 @@ export type AgentRole =
 
 export type AgentStatus = 'idle' | 'running' | 'completed' | 'error' | 'stopped';
 
+// Model tiers for smart selection
+export type ModelTier = 'fast' | 'balanced' | 'powerful';
+
+export interface ModelConfig {
+  id: string;
+  tier: ModelTier;
+  inputCost: number;   // per 1M tokens
+  outputCost: number;  // per 1M tokens
+}
+
+// Response modes for token optimization
+export type ResponseMode = 'concise' | 'balanced' | 'detailed';
+
 export interface AgentConfig {
   id: AgentRole;
   name: string;
@@ -30,9 +43,12 @@ export interface AgentConfig {
   systemPrompt: string;
   capabilities: string[];
   model?: string;
-  role?: string;           // Short role description (e.g., "Planning & Research")
-  example?: AgentExample;  // Input/Output example
-  source?: 'file' | 'builtin';  // Where the agent config comes from
+  recommendedModel?: ModelTier;  // Suggested model tier based on task complexity
+  responseMode?: ResponseMode;   // Control output verbosity
+  maxOutputTokens?: number;      // Limit output tokens
+  role?: string;                 // Short role description (e.g., "Planning & Research")
+  example?: AgentExample;        // Input/Output example
+  source?: 'file' | 'builtin';   // Where the agent config comes from
 }
 
 export interface AgentExample {
@@ -58,6 +74,12 @@ export interface AgentState {
   tokenUsage?: TokenUsage;
 }
 
+export interface TokenBudget {
+  daily: number;          // Max tokens per day
+  warning: number;        // Warning threshold (0-1, e.g., 0.8 = 80%)
+  enabled: boolean;       // Whether budget is active
+}
+
 export interface ProjectTokenStats {
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -69,6 +91,10 @@ export interface ProjectTokenStats {
   // Session tracking
   sessionStartTime?: number;      // When this tracking session started
   lastResetTime?: number;         // When stats were last reset
+  // Budget tracking
+  budget?: TokenBudget;
+  dailyTokens?: number;           // Tokens used today
+  dailyResetTime?: number;        // When daily counter was last reset
 }
 
 // Workflow Types
@@ -110,6 +136,25 @@ export interface RunResult {
   error?: string;
   exitCode?: number;
   tokenUsage?: TokenUsage;
+  sessionId?: string;  // Claude session ID for conversation continuation
+}
+
+// Conversation History Types (for session continuation)
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  tokenUsage?: TokenUsage;
+}
+
+export interface ConversationHistory {
+  agentId: AgentRole;
+  sessionId: string;          // Claude CLI session ID for --resume
+  messages: ConversationMessage[];
+  createdAt: number;
+  lastUpdatedAt: number;
+  totalTokens: number;
+  totalCost: number;
 }
 
 // Message Types (Extension <-> Webview communication)
@@ -125,6 +170,9 @@ export type MessageType =
   | 'tokenUpdate'
   | 'getTokenStats'
   | 'resetTokenStats'
+  | 'getConversationHistory'
+  | 'conversationHistory'
+  | 'clearConversation'
   | 'error';
 
 export interface Message<T = unknown> {

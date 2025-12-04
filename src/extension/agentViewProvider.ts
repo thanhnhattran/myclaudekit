@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { StateManager } from '../lib/stateManager';
-import { Message, RunAgentPayload, StopAgentPayload, ProjectTokenStats, AgentConfig } from '../types';
+import { Message, RunAgentPayload, StopAgentPayload, ProjectTokenStats, AgentConfig, AgentRole } from '../types';
 import { AGENTS } from '../agents/agents.config';
 import { AgentLoader, mergeAgents } from '../lib/agentLoader';
 
@@ -25,12 +25,42 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
     // Initialize agent loader with workspace root
     this._initializeAgentLoader();
+
+    // Listen for workspace folder changes
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      console.log('[ClaudeKit] Workspace folders changed, reinitializing...');
+      this._reinitializeForNewWorkspace();
+    });
+  }
+
+  /**
+   * Reinitialize when workspace changes
+   */
+  private _reinitializeForNewWorkspace(): void {
+    // Close old file watcher
+    if (this._fileWatcher) {
+      this._fileWatcher.close();
+      this._fileWatcher = null;
+    }
+
+    // Clear cached agents
+    this._cachedAgents = [];
+    this._agentLoader = undefined;
+
+    // Reinitialize with new workspace
+    this._initializeAgentLoader();
+
+    // Reload agents and notify webview
+    this._loadAgentsAndNotify();
   }
 
   private _initializeAgentLoader(): void {
     const workspaceFolders = vscode.workspace.workspaceFolders;
+    console.log('[ClaudeKit] Initializing agent loader, workspace folders:', workspaceFolders?.map(f => f.uri.fsPath));
+
     if (workspaceFolders && workspaceFolders.length > 0) {
       const workspaceRoot = workspaceFolders[0].uri.fsPath;
+      console.log('[ClaudeKit] Using workspace root:', workspaceRoot);
       this._agentLoader = new AgentLoader(workspaceRoot);
 
       // Watch for changes in .claude/agents/ folder
@@ -109,7 +139,10 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
 
   public sendMessage(message: Message): void {
     if (this._view) {
+      console.log('[ClaudeKit] sendMessage to webview:', message.type, message.payload ? '(has payload)' : '(no payload)');
       this._view.webview.postMessage(message);
+    } else {
+      console.log('[ClaudeKit] sendMessage FAILED - no view!');
     }
   }
 
@@ -144,6 +177,25 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       case 'resetTokenStats':
         this._stateManager.resetTokenStats();
         vscode.window.showInformationMessage('Token statistics reset');
+        break;
+
+      case 'getConversationHistory':
+        const agentId = message.payload as AgentRole;
+        const history = this._stateManager.getConversationHistory(agentId);
+        this.sendMessage({
+          type: 'conversationHistory',
+          payload: { agentId, history }
+        });
+        break;
+
+      case 'clearConversation':
+        const clearAgentId = message.payload as AgentRole;
+        this._stateManager.clearConversationHistory(clearAgentId);
+        this.sendMessage({
+          type: 'conversationHistory',
+          payload: { agentId: clearAgentId, history: null }
+        });
+        vscode.window.showInformationMessage(`Conversation cleared for agent. Next run will start fresh.`);
         break;
 
       default:
@@ -219,12 +271,12 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .tab.active { color: var(--fg); border-bottom-color: var(--focus); }
 
     /* Tab content */
-    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .tab-content { display: none; flex: 1; overflow-y: auto; }
     .tab-content.active { display: flex; flex-direction: column; }
 
     /* Agents Grid */
     .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 8px 0; }
-    .agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; overflow-y: auto; flex: 1; padding: 2px; }
+    .agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 2px; min-height: 120px; flex-shrink: 0; }
     .agent-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; cursor: pointer; transition: all 0.15s; text-align: center; }
     .agent-card:hover { border-color: var(--focus); background: var(--hover); }
     .agent-card.running { border-color: var(--warning); animation: pulse 1.5s infinite; }
@@ -232,6 +284,10 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .agent-card.error { border-color: var(--error); }
     .agent-card.selected { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--muted); border-top-color: var(--focus); border-radius: 50%; animation: spin 1s linear infinite; }
+    .loading-message { display: flex; align-items: center; gap: 8px; color: var(--muted); padding: 12px; }
+    .output-content { white-space: pre-wrap; word-break: break-word; }
     .agent-icon { font-size: 20px; }
     .agent-name { font-size: 10px; font-weight: 500; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .agent-status { font-size: 9px; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
@@ -274,7 +330,7 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .token-stat-cost { color: var(--success); }
 
     /* Agent Details Panel */
-    .agent-details { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 8px; display: none; }
+    .agent-details { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 8px; display: none; max-height: 300px; overflow-y: auto; position: relative; }
     .agent-details.visible { display: block; }
     .agent-details-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
     .agent-details-icon { font-size: 24px; }
@@ -282,6 +338,10 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .agent-details-name { font-size: 14px; font-weight: 600; }
     .agent-details-role { font-size: 11px; color: var(--muted); }
     .agent-details-source { font-size: 9px; padding: 2px 6px; border-radius: 3px; background: var(--hover); color: var(--muted); }
+    .agent-details-model { font-size: 9px; padding: 2px 6px; border-radius: 3px; margin-left: 4px; font-weight: 500; }
+    .agent-details-model.fast { background: #2d6a4f; color: #b7e4c7; }
+    .agent-details-model.balanced { background: #1d3557; color: #a8dadc; }
+    .agent-details-model.powerful { background: #9d4edd; color: #e0aaff; }
     .agent-details-desc { font-size: 12px; color: var(--fg); margin-bottom: 8px; line-height: 1.4; }
     .agent-details-caps { margin-bottom: 8px; }
     .agent-details-caps-title { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
@@ -298,6 +358,14 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     .example-content { white-space: pre-wrap; word-break: break-word; color: var(--fg); }
     .example-input { border-left: 2px solid var(--success); padding-left: 8px; }
     .example-output { border-left: 2px solid var(--focus); padding-left: 8px; }
+
+    /* Conversation History Indicator */
+    .conversation-indicator { display: flex; align-items: center; justify-content: space-between; background: var(--hover); border-radius: 4px; padding: 6px 8px; margin-top: 8px; font-size: 10px; }
+    .conversation-indicator.has-history { background: rgba(46, 125, 50, 0.2); border: 1px solid rgba(46, 125, 50, 0.4); }
+    .conversation-info { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+    .conversation-info.active { color: var(--success); }
+    .clear-conversation-btn { background: transparent; border: 1px solid var(--muted); color: var(--muted); padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 9px; }
+    .clear-conversation-btn:hover { background: var(--error); border-color: var(--error); color: white; }
   </style>
 </head>
 <body>
@@ -358,6 +426,8 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
             <div id="agent-details-role" class="agent-details-role"></div>
           </div>
           <span id="agent-details-source" class="agent-details-source"></span>
+          <span id="agent-details-model" class="agent-details-model"></span>
+          <button class="icon-btn" onclick="closeAgentDetails()" title="Close" style="padding: 2px 6px; font-size: 12px;">✕</button>
         </div>
         <div id="agent-details-desc" class="agent-details-desc"></div>
         <div class="agent-details-caps">
@@ -377,6 +447,14 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
             <div class="example-label">OUTPUT</div>
             <div id="example-output" class="example-content example-output"></div>
           </div>
+        </div>
+        <!-- Conversation History Indicator -->
+        <div id="conversation-indicator" class="conversation-indicator" style="display: none;">
+          <div id="conversation-info" class="conversation-info">
+            <span>💬</span>
+            <span id="conversation-status">No active conversation</span>
+          </div>
+          <button id="clear-conversation-btn" class="clear-conversation-btn" onclick="clearConversation()" style="display: none;">Clear History</button>
         </div>
       </div>
     </div>
@@ -437,11 +515,17 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       if (type === 'agentsList') { agents = payload; renderAgents(); }
       if (type === 'agentUpdate') { updateAgentState(payload.agentId, payload.state); }
       if (type === 'tokenUpdate') { updateTokenStats(payload); }
+      if (type === 'conversationHistory') { updateConversationIndicator(payload.agentId, payload.history); }
     });
 
     // Token stats functions
     function updateTokenStats(stats) {
-      if (!stats) return;
+      console.log('[ClaudeKit WebView] updateTokenStats called with:', stats);
+      if (!stats) {
+        console.log('[ClaudeKit WebView] stats is null/undefined, returning');
+        return;
+      }
+      console.log('[ClaudeKit WebView] Updating UI - totalTokens:', stats.totalTokens, 'cost:', stats.totalCost);
       document.getElementById('total-tokens').textContent = formatNumber(stats.totalTokens);
       document.getElementById('input-tokens').textContent = formatNumber(stats.totalInputTokens);
       document.getElementById('output-tokens').textContent = formatNumber(stats.totalOutputTokens);
@@ -515,14 +599,24 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
     }
 
     function showAgentDetails(agent) {
+      console.log('[ClaudeKit] showAgentDetails called for:', agent.id);
       const panel = document.getElementById('agent-details');
+      console.log('[ClaudeKit] agent-details panel found:', !!panel);
       panel.classList.add('visible');
+      console.log('[ClaudeKit] Added visible class, classList:', panel.classList.toString());
 
       document.getElementById('agent-details-icon').textContent = agent.icon;
       document.getElementById('agent-details-name').textContent = agent.name;
       document.getElementById('agent-details-role').textContent = agent.role || agent.description.split('.')[0];
       document.getElementById('agent-details-source').textContent = agent.source === 'file' ? 'Custom' : 'Built-in';
       document.getElementById('agent-details-desc').textContent = agent.description;
+
+      // Show model tier badge
+      const modelBadge = document.getElementById('agent-details-model');
+      const tier = agent.recommendedModel || 'balanced';
+      const tierNames = { fast: '⚡ Haiku', balanced: '⚖️ Sonnet', powerful: '🚀 Opus' };
+      modelBadge.textContent = tierNames[tier] || tierNames.balanced;
+      modelBadge.className = 'agent-details-model ' + tier;
 
       // Render capabilities
       const capsList = document.getElementById('agent-details-caps');
@@ -544,10 +638,20 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
         toggleContainer.style.display = 'none';
         examplePanel.classList.remove('visible');
       }
+
+      // Request conversation history for this agent (to show if --resume is available)
+      document.getElementById('conversation-indicator').style.display = 'flex';
+      vscode.postMessage({ type: 'getConversationHistory', payload: agent.id });
     }
 
     function hideAgentDetails() {
       document.getElementById('agent-details').classList.remove('visible');
+    }
+
+    function closeAgentDetails() {
+      selectedAgentId = null;
+      hideAgentDetails();
+      renderAgents();
     }
 
     function toggleExample() {
@@ -575,11 +679,12 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       if (!prompt) return;
 
       if (selectedAgentId) {
+        const agent = agents.find(a => a.id === selectedAgentId);
         vscode.postMessage({ type: 'runAgent', payload: { agentId: selectedAgentId, prompt } });
-        updateOutput('Starting agent...');
+        showLoading(agent ? agent.name : 'Agent');
       } else if (selectedWorkflowId) {
         vscode.postMessage({ type: 'runWorkflow', payload: { workflowId: selectedWorkflowId, prompt } });
-        updateOutput('Starting workflow...');
+        showLoading('Workflow');
       } else {
         updateOutput('Please select an agent or workflow first.');
       }
@@ -595,14 +700,67 @@ export class AgentViewProvider implements vscode.WebviewViewProvider {
       if (agent) {
         agent.state = state;
         renderAgents();
-        if (selectedAgentId === agentId) updateOutput(state.output || state.error || 'No output');
+        if (selectedAgentId === agentId) {
+          if (state.status === 'running') {
+            showLoading(agent.name);
+          } else {
+            updateOutput(state.output || state.error || 'No output');
+          }
+        }
       }
+    }
+
+    function showLoading(agentName) {
+      const panel = document.getElementById('output-panel');
+      panel.innerHTML = '<div class="loading-message"><span class="spinner"></span><span>Running ' + agentName + '...</span></div>';
     }
 
     function updateOutput(content) {
       const panel = document.getElementById('output-panel');
-      panel.textContent = content;
+      // Format markdown-like content
+      const formatted = content
+        .replace(/^## (.+)$/gm, '<div style="font-size:14px;font-weight:bold;color:var(--fg);margin:12px 0 6px 0;">$1</div>')
+        .replace(/^### (.+)$/gm, '<div style="font-size:12px;font-weight:bold;color:var(--fg);margin:10px 0 4px 0;">$1</div>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^- (.+)$/gm, '<div style="padding-left:12px;">• $1</div>')
+        .replace(/✅|✓/g, '<span style="color:var(--success);">✓</span>')
+        .replace(/❌|✗/g, '<span style="color:var(--error);">✗</span>')
+        .replace(/⚠️/g, '<span style="color:var(--warning);">⚠</span>');
+      panel.innerHTML = '<div class="output-content">' + formatted + '</div>';
       panel.scrollTop = panel.scrollHeight;
+    }
+
+    // Conversation history functions
+    function updateConversationIndicator(agentId, history) {
+      if (selectedAgentId !== agentId) return; // Only update if this agent is selected
+
+      const indicator = document.getElementById('conversation-indicator');
+      const info = document.getElementById('conversation-info');
+      const status = document.getElementById('conversation-status');
+      const clearBtn = document.getElementById('clear-conversation-btn');
+
+      if (history && history.messages && history.messages.length > 0) {
+        // Has conversation history - can use --resume
+        indicator.classList.add('has-history');
+        info.classList.add('active');
+        const msgCount = history.messages.length / 2; // user + assistant pairs
+        const tokenSaved = history.totalTokens || 0;
+        status.textContent = \`\${msgCount} exchanges • \${formatNumber(tokenSaved)} tokens saved on resume\`;
+        clearBtn.style.display = 'block';
+      } else {
+        // No conversation history
+        indicator.classList.remove('has-history');
+        info.classList.remove('active');
+        status.textContent = 'New conversation (no history)';
+        clearBtn.style.display = 'none';
+      }
+    }
+
+    function clearConversation() {
+      if (!selectedAgentId) return;
+      if (confirm('Clear conversation history? Next run will start fresh (no --resume savings).')) {
+        vscode.postMessage({ type: 'clearConversation', payload: selectedAgentId });
+      }
     }
 
     // Enter to run

@@ -1,4 +1,4 @@
-import { AgentRole, AgentState, WorkflowState, TokenUsage, ProjectTokenStats } from '../types';
+import { AgentRole, AgentState, WorkflowState, TokenUsage, ProjectTokenStats, ConversationHistory } from '../types';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
 
@@ -14,6 +14,7 @@ export class StateManager extends EventEmitter {
   private workflowStates: Map<string, WorkflowState> = new Map();
   private runnerAbortControllers: Map<AgentRole, AbortController> = new Map();
   private tokenStats: ProjectTokenStats;
+  private conversationHistories: Map<AgentRole, ConversationHistory> = new Map();
   private context?: vscode.ExtensionContext;
 
   constructor(context?: vscode.ExtensionContext) {
@@ -72,6 +73,9 @@ export class StateManager extends EventEmitter {
       usage.cost = cost;
     }
 
+    // Check if we need to reset daily counter (new day)
+    this.checkDailyReset();
+
     // Update totals
     this.tokenStats.totalInputTokens += usage.inputTokens;
     this.tokenStats.totalOutputTokens += usage.outputTokens;
@@ -79,6 +83,9 @@ export class StateManager extends EventEmitter {
     this.tokenStats.totalCost += cost;
     this.tokenStats.sessionCount++;
     this.tokenStats.lastUpdated = Date.now();
+
+    // Update daily tokens
+    this.tokenStats.dailyTokens = (this.tokenStats.dailyTokens || 0) + usage.totalTokens;
 
     // Update per-agent stats
     if (!this.tokenStats.byAgent[agentId]) {
@@ -96,6 +103,75 @@ export class StateManager extends EventEmitter {
 
     this.saveTokenStats();
     this.emit('tokenStatsChanged', this.tokenStats);
+
+    // Check budget and emit warning if needed
+    this.checkBudgetWarning();
+  }
+
+  /**
+   * Check if daily counter needs to be reset (new day)
+   */
+  private checkDailyReset(): void {
+    const now = Date.now();
+    const lastReset = this.tokenStats.dailyResetTime || 0;
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    // Reset if more than 24 hours since last reset
+    if (now - lastReset > oneDayMs) {
+      this.tokenStats.dailyTokens = 0;
+      this.tokenStats.dailyResetTime = now;
+    }
+  }
+
+  /**
+   * Check budget and emit warning event if threshold exceeded
+   */
+  private checkBudgetWarning(): void {
+    const budget = this.tokenStats.budget;
+    if (!budget || !budget.enabled) return;
+
+    const dailyTokens = this.tokenStats.dailyTokens || 0;
+    const percentage = dailyTokens / budget.daily;
+
+    if (percentage >= 1) {
+      this.emit('budgetExceeded', { dailyTokens, budget: budget.daily, percentage });
+    } else if (percentage >= budget.warning) {
+      this.emit('budgetWarning', { dailyTokens, budget: budget.daily, percentage });
+    }
+  }
+
+  /**
+   * Set token budget
+   */
+  public setBudget(daily: number, warning: number = 0.8): void {
+    this.tokenStats.budget = { daily, warning, enabled: true };
+    this.saveTokenStats();
+    this.emit('tokenStatsChanged', this.tokenStats);
+  }
+
+  /**
+   * Disable budget tracking
+   */
+  public disableBudget(): void {
+    if (this.tokenStats.budget) {
+      this.tokenStats.budget.enabled = false;
+      this.saveTokenStats();
+      this.emit('tokenStatsChanged', this.tokenStats);
+    }
+  }
+
+  /**
+   * Get budget status
+   */
+  public getBudgetStatus(): { enabled: boolean; percentage: number; remaining: number } | null {
+    const budget = this.tokenStats.budget;
+    if (!budget || !budget.enabled) return null;
+
+    const dailyTokens = this.tokenStats.dailyTokens || 0;
+    const percentage = dailyTokens / budget.daily;
+    const remaining = Math.max(0, budget.daily - dailyTokens);
+
+    return { enabled: true, percentage, remaining };
   }
 
   public resetTokenStats(): void {
@@ -113,6 +189,111 @@ export class StateManager extends EventEmitter {
     };
     this.saveTokenStats();
     this.emit('tokenStatsChanged', this.tokenStats);
+  }
+
+  // Conversation History Management (for --resume token savings)
+
+  /**
+   * Get conversation history for an agent
+   */
+  public getConversationHistory(agentId: AgentRole): ConversationHistory | undefined {
+    return this.conversationHistories.get(agentId);
+  }
+
+  /**
+   * Get all conversation histories
+   */
+  public getAllConversationHistories(): ConversationHistory[] {
+    return Array.from(this.conversationHistories.values());
+  }
+
+  /**
+   * Start or continue a conversation for an agent
+   * Returns sessionId if conversation exists (for --resume)
+   */
+  public getSessionIdForAgent(agentId: AgentRole): string | undefined {
+    const history = this.conversationHistories.get(agentId);
+    return history?.sessionId;
+  }
+
+  /**
+   * Add a message to conversation history
+   * Creates new history if agent doesn't have one
+   */
+  public addConversationMessage(
+    agentId: AgentRole,
+    sessionId: string,
+    userPrompt: string,
+    assistantResponse: string,
+    tokenUsage?: TokenUsage
+  ): void {
+    const now = Date.now();
+    let history = this.conversationHistories.get(agentId);
+
+    if (!history) {
+      // Create new conversation history
+      history = {
+        agentId,
+        sessionId,
+        messages: [],
+        createdAt: now,
+        lastUpdatedAt: now,
+        totalTokens: 0,
+        totalCost: 0
+      };
+    }
+
+    // Update sessionId if changed (shouldn't happen normally)
+    history.sessionId = sessionId;
+    history.lastUpdatedAt = now;
+
+    // Add user message
+    history.messages.push({
+      role: 'user',
+      content: userPrompt,
+      timestamp: now
+    });
+
+    // Add assistant response
+    history.messages.push({
+      role: 'assistant',
+      content: assistantResponse,
+      timestamp: now,
+      tokenUsage
+    });
+
+    // Update totals
+    if (tokenUsage) {
+      history.totalTokens += tokenUsage.totalTokens;
+      history.totalCost += tokenUsage.cost || 0;
+    }
+
+    this.conversationHistories.set(agentId, history);
+    this.emit('conversationUpdated', agentId, history);
+  }
+
+  /**
+   * Clear conversation history for an agent (start fresh)
+   */
+  public clearConversationHistory(agentId: AgentRole): void {
+    this.conversationHistories.delete(agentId);
+    this.emit('conversationCleared', agentId);
+  }
+
+  /**
+   * Clear all conversation histories
+   */
+  public clearAllConversationHistories(): void {
+    this.conversationHistories.clear();
+    this.emit('allConversationsCleared');
+  }
+
+  /**
+   * Check if agent has active conversation (can use --resume)
+   */
+  public hasActiveConversation(agentId: AgentRole): boolean {
+    const history = this.conversationHistories.get(agentId);
+    return !!(history && history.sessionId && history.messages.length > 0);
   }
 
   // Agent State Management

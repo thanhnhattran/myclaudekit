@@ -1,4 +1,29 @@
-import { AgentConfig } from '../types';
+import { AgentConfig, ResponseMode } from '../types';
+
+/**
+ * Response mode instructions for token optimization
+ */
+const RESPONSE_MODE_INSTRUCTIONS: Record<ResponseMode, string[]> = {
+  concise: [
+    '- Be extremely concise - no unnecessary words',
+    '- Use bullet points over paragraphs',
+    '- Skip explanations unless critical',
+    '- Aim for shortest possible helpful response',
+    '- No greetings, sign-offs, or filler'
+  ],
+  balanced: [
+    '- Be concise but complete',
+    '- Use markdown formatting for clarity',
+    '- Include brief explanations where helpful',
+    '- Provide working solutions'
+  ],
+  detailed: [
+    '- Provide comprehensive, thorough responses',
+    '- Include detailed explanations and reasoning',
+    '- Cover edge cases and alternatives',
+    '- Use examples where helpful'
+  ]
+};
 
 export class PromptManager {
   /**
@@ -31,12 +56,17 @@ export class PromptManager {
     parts.push('\n**Instructions:**');
     parts.push(agent.systemPrompt);
 
-    // Output format guidelines
+    // Output format guidelines based on responseMode
+    const mode = agent.responseMode || 'balanced';
     parts.push('\n**Output Guidelines:**');
-    parts.push('- Be concise and actionable');
-    parts.push('- Use markdown formatting for clarity');
-    parts.push('- If you encounter errors, explain them clearly');
-    parts.push('- Always provide complete, working solutions');
+    RESPONSE_MODE_INSTRUCTIONS[mode].forEach(instruction => {
+      parts.push(instruction);
+    });
+
+    // Add max output tokens hint if specified
+    if (agent.maxOutputTokens) {
+      parts.push(`- Keep response under ~${agent.maxOutputTokens} tokens`);
+    }
 
     return parts.join('\n');
   }

@@ -1,11 +1,27 @@
 import { AgentConfig, AgentRole } from '../types';
 
+/**
+ * Built-in Agents Configuration
+ *
+ * Model Tier Guide:
+ * - fast (Haiku): Simple tasks - formatting, explaining, summarizing, exploring
+ * - balanced (Sonnet): Code tasks - implementation, review, testing, debugging
+ * - powerful (Opus): Complex tasks - security audits, architecture, complex reasoning
+ *
+ * Response Mode Guide:
+ * - concise: Short, focused answers (save output tokens)
+ * - balanced: Standard responses
+ * - detailed: Comprehensive, in-depth answers
+ */
+
 export const AGENTS: AgentConfig[] = [
   {
     id: 'planner',
     name: 'Planner',
     icon: '🧠',
     description: 'Creates detailed implementation plans and breaks down complex tasks',
+    recommendedModel: 'balanced',
+    responseMode: 'balanced',
     capabilities: [
       'Analyze requirements and scope',
       'Break down tasks into actionable steps',
@@ -27,6 +43,8 @@ Output a structured plan in markdown format with numbered steps.`
     name: 'Scout',
     icon: '🔍',
     description: 'Explores and maps codebase structure, finds relevant files',
+    recommendedModel: 'fast',  // Simple exploration task
+    responseMode: 'concise',
     capabilities: [
       'Navigate directory structures',
       'Find relevant files and patterns',
@@ -48,6 +66,8 @@ Use glob patterns and grep to find what you need. Always explain what you found.
     name: 'Researcher',
     icon: '📚',
     description: 'Gathers information, documentation, and best practices',
+    recommendedModel: 'fast',  // Information gathering
+    responseMode: 'balanced',
     capabilities: [
       'Search for documentation',
       'Find best practices',
@@ -69,6 +89,8 @@ Always cite sources and explain the reasoning behind recommendations.`
     name: 'Implementer',
     icon: '💻',
     description: 'Writes production-quality code following best practices',
+    recommendedModel: 'balanced',  // Code writing needs good reasoning
+    responseMode: 'balanced',
     capabilities: [
       'Write clean, maintainable code',
       'Follow project conventions',
@@ -90,6 +112,8 @@ Always provide complete, working code that can be directly used.`
     name: 'Code Reviewer',
     icon: '🔬',
     description: 'Reviews code for quality, bugs, and best practices',
+    recommendedModel: 'balanced',  // Code review needs attention
+    responseMode: 'concise',
     capabilities: [
       'Identify bugs and issues',
       'Check code quality',
@@ -111,6 +135,8 @@ Provide specific, actionable feedback with examples of how to improve.`
     name: 'Security Auditor',
     icon: '🔒',
     description: 'Analyzes code for security vulnerabilities and risks',
+    recommendedModel: 'powerful',  // Security requires deep analysis
+    responseMode: 'detailed',
     capabilities: [
       'Find security vulnerabilities',
       'Check for common exploits (OWASP Top 10)',
@@ -132,6 +158,8 @@ Prioritize findings by severity and provide clear remediation steps.`
     name: 'UI/UX Designer',
     icon: '🎨',
     description: 'Designs user interfaces and improves user experience',
+    recommendedModel: 'balanced',  // Design needs creativity + code
+    responseMode: 'balanced',
     capabilities: [
       'Design user interfaces',
       'Improve UX patterns',
@@ -153,6 +181,8 @@ Focus on usability, accessibility, and visual clarity.`
     name: 'Database Admin',
     icon: '🗄️',
     description: 'Manages database schemas, queries, and migrations',
+    recommendedModel: 'balanced',  // DB queries need precision
+    responseMode: 'balanced',
     capabilities: [
       'Design database schemas',
       'Write efficient queries',
@@ -174,6 +204,8 @@ Always consider scalability and data safety in your solutions.`
     name: 'Tester',
     icon: '🧪',
     description: 'Creates and runs tests, ensures code quality',
+    recommendedModel: 'balanced',  // Tests need good code
+    responseMode: 'balanced',
     capabilities: [
       'Write unit tests',
       'Create integration tests',
@@ -195,6 +227,8 @@ Tests should be clear, maintainable, and actually verify the behavior.`
     name: 'Documenter',
     icon: '📝',
     description: 'Writes documentation, comments, and user guides',
+    recommendedModel: 'fast',  // Documentation is straightforward
+    responseMode: 'balanced',
     capabilities: [
       'Write technical documentation',
       'Create API documentation',
@@ -216,6 +250,8 @@ Documentation should be concise, accurate, and useful.`
     name: 'Debugger',
     icon: '🐛',
     description: 'Finds and fixes bugs, traces issues',
+    recommendedModel: 'balanced',  // Debugging needs reasoning
+    responseMode: 'balanced',
     capabilities: [
       'Trace bugs to root cause',
       'Analyze error messages',
@@ -237,6 +273,8 @@ Be systematic and thorough in your debugging approach.`
     name: 'Optimizer',
     icon: '⚡',
     description: 'Improves performance and optimizes code',
+    recommendedModel: 'powerful',  // Performance needs deep analysis
+    responseMode: 'detailed',
     capabilities: [
       'Profile performance',
       'Identify bottlenecks',
@@ -258,6 +296,8 @@ Always measure before and after, and only optimize what matters.`
     name: 'DevOps',
     icon: '🔧',
     description: 'Handles CI/CD, deployment, and infrastructure',
+    recommendedModel: 'balanced',  // DevOps needs good config
+    responseMode: 'balanced',
     capabilities: [
       'Configure CI/CD pipelines',
       'Set up deployment scripts',
@@ -279,6 +319,8 @@ Focus on automation, reliability, and maintainability.`
     name: 'Brainstormer',
     icon: '💡',
     description: 'Generates creative ideas and solutions',
+    recommendedModel: 'fast',  // Brainstorming doesn't need complex reasoning
+    responseMode: 'balanced',
     capabilities: [
       'Generate creative solutions',
       'Think outside the box',
@@ -300,6 +342,8 @@ Don't self-censor - even "crazy" ideas can lead to great solutions.`
     name: 'Aggregator',
     icon: '🎯',
     description: 'Synthesizes outputs from multiple agents into unified results',
+    recommendedModel: 'fast',  // Aggregation is summarization
+    responseMode: 'concise',
     capabilities: [
       'Combine multiple inputs',
       'Resolve conflicts',

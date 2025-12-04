@@ -61,6 +61,8 @@ export function registerCommands(
 
       // Get working directory
       const workingDirectory = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+      console.log('[ClaudeKit] runAgent - workspaceFolders:', vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath));
+      console.log('[ClaudeKit] runAgent - using workingDirectory:', workingDirectory);
 
       // Create runner and execute
       const runner = new AgentRunner({
@@ -95,6 +97,14 @@ export function registerCommands(
       });
 
       try {
+        // Check for existing session (conversation continuation = BIG token savings!)
+        const existingSessionId = stateManager.getSessionIdForAgent(agentId);
+        const isResume = existingSessionId !== undefined;
+
+        if (isResume) {
+          console.log(`[ClaudeKit] Resuming conversation with session: ${existingSessionId}`);
+        }
+
         const result = await runner.run(agent, prompt, (chunk) => {
           // Stream output to state
           const currentState = stateManager.getAgentState(agentId!);
@@ -113,7 +123,7 @@ export function registerCommands(
               }
             });
           }
-        });
+        }, existingSessionId);
 
         // Update final state with token usage
         stateManager.updateAgentState(agentId, {
@@ -125,6 +135,18 @@ export function registerCommands(
           endTime: Date.now(),
           tokenUsage: result.tokenUsage
         });
+
+        // Store conversation history for future --resume (saves 50-70% tokens!)
+        if (result.success && result.sessionId) {
+          stateManager.addConversationMessage(
+            agentId,
+            result.sessionId,
+            prompt,
+            result.output,
+            result.tokenUsage
+          );
+          console.log(`[ClaudeKit] Stored conversation for agent ${agentId}, session: ${result.sessionId}`);
+        }
 
         // Track token usage
         if (result.tokenUsage) {
@@ -140,7 +162,8 @@ export function registerCommands(
           const tokenInfo = result.tokenUsage
             ? ` (${result.tokenUsage.totalTokens} tokens)`
             : '';
-          vscode.window.showInformationMessage(`Agent ${agent.name} completed${tokenInfo}`);
+          const resumeInfo = isResume ? ' [resumed]' : '';
+          vscode.window.showInformationMessage(`Agent ${agent.name} completed${tokenInfo}${resumeInfo}`);
         } else {
           vscode.window.showErrorMessage(`Agent ${agent.name} failed: ${result.error}`);
         }
